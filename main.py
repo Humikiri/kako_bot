@@ -1,25 +1,30 @@
 import discord
 from discord.ext import commands
 import asyncio
-from collections import deque
 import datetime
 
 from player import Player
 
+# .envからDISCORトークンとチャンネルIDを取得
 import os
 from dotenv import load_dotenv
-
 load_dotenv()
 TOKEN = os.environ.get('TOKEN')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
-intents = discord.Intents.all()
+# Botのインテント(イベントを監視する対象)を設定
+### メッセージとリアクションに関するイベントのみをボットに許可
+intents = discord.Intents.default()
+intents.messages = True
+intents.reactions = True
+
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# 対局待ちとマッチリストを格納するためのキューを生成
 queue = []
 match_list = []
 
-# 「!helpCommand」「!ヘルプ」と入力されたら、対局待ちリストにユーザを追加する処理
+# 「!helpCommand」「!ヘルプ」と入力されたら、各コマンドの説明をEmbedメッセージで返す
 @bot.command(aliases=['ヘルプ'])
 async def helpCommand(ctx):
     embed = discord.Embed(title="Command Help", description="This program is a bot for recruiting people who want to play on Discord.", color=0x00ff00)
@@ -41,11 +46,12 @@ async def helpCommand(ctx):
 
     await ctx.send(embed=embed)
 
-
+# 対局待ちキューにプレイヤーを追加するための関数
 def add_to_queue(player):
     queue.append(player)
     return True
 
+# Botが準備ができた時に実行されるイベントハンドラ。ログを出力し、定期的なキュー更新を行うタスクを開始する
 @bot.event
 async def on_ready():
     print('ログインしました')
@@ -53,6 +59,7 @@ async def on_ready():
 
 
 # 「!対局したい」「!JoinMatch」と入力されたら、対局待ちリストにユーザを追加する処理
+#### ユーザを対局待ちキューに追加し、確認メッセージを返す
 @bot.command(aliases=['対局したい'])
 async def JoinMatch(ctx, *, date=None):
     user = ctx.author
@@ -101,6 +108,7 @@ async def JoinMatch(ctx, *, date=None):
         await ctx.send(f'{user.mention} 日付の形式が正しくありません。もう一度お試しください。')
         await ctx.send(f'{user.mention} The date format is incorrect. Please try again.')
 
+# 対局待ちキューをEmbedメッセージで表示するための関数
 async def show_queue(channel):
     embed = discord.Embed(title="対局待ちリスト", color=0x00ff00)
     embed = discord.Embed(title="waiting list", color=0x00ff00)
@@ -118,6 +126,7 @@ async def show_queue(channel):
             embed.add_field(name='', value=f'{q.time}', inline=True)  
     await channel.send(embed=embed)
 
+# 対局予約リストをEmbedメッセージで表示するための関数
 async def show_match_list(channel):
     embed = discord.Embed(title="対局予約リスト", color=0x00ff00)
     embed = discord.Embed(title="Game reservation list", color=0x00ff00)
@@ -138,33 +147,41 @@ async def show_match_list(channel):
             embed.add_field(name='', value=f'{q["date"]}', inline=True)   
     await channel.send(embed=embed)
 
+# '!対局待ち' や '!MatchQueue' コマンドを処理するための関数。対局待ちキューを表示する
 @bot.command(aliases=['対局待ち'])
 async def MatchQueue(ctx):
     await show_queue(ctx.channel)
 
-
+#キャンセルまたは CancelMatchという名前の非同期関数を定義します。
+##この関数はユーザーが待機中の対局をキャンセルするために使用します。
 @bot.command(aliases=['キャンセル'])
 async def CancelMatch(ctx):
+    #コマンドを送信したユーザーを取得します。
     user = ctx.author
     if len(queue) < 1:
+        # ゲームの待機キューが空の場合、ユーザーに通知します。
         await ctx.send('対局待ちしているプレイヤーがいません')
         await ctx.send('No players waiting for game')
     else:
+        # キュー内にゲームが存在する場合、キャンセルするゲームをユーザーに選択させます
         await ctx.send('キャンセルする対局待ちを選択して下さい。選択はNo.の番号のみを入力してください\n' \
                        '例：3')
         await ctx.send('Please select the waiting game to cancel. Please enter only the number of the No.\n e.g. 3')
         await show_queue(ctx.message.channel) 
         def check_message(message):
+            # メッセージが正しいユーザーからのもので、正しいチャンネルに投稿されたものであることを確認するための関数を定義します。
             return message.author == ctx.author and message.channel == ctx.channel
         try:
             message = await bot.wait_for('message', check=check_message, timeout=30)
             try:
+                ### select_row:プレイヤーが選択した行番号
                 select_row = int(message.content) 
                 select_row = select_row - 1
                 if select_row >= 0 and select_row < len(queue):
                     gameInfo = queue[select_row]
                     player1 = gameInfo.user
                     game_time = gameInfo.time
+                    ### 同名プレイヤーの対局待ちのみキャンセルできるようにエラーチェック
                     if player1 == user:
                         await ctx.send(f'{user.mention} {player1}の{game_time}対局待ちをキャンセルしました。\n')
                         await ctx.send(f'{user.mention} {player1}  {game_time} waiting game has been cancelled. \n')
@@ -188,14 +205,17 @@ async def CancelMatch(ctx):
             await ctx.send(f'{user.mention} timed out.' \
                             'Please start over from the \n match selection command')
 
+# "予約状況"あるいは"ReservationStatus"コマンドで現在の予約状況を連絡します。
 @bot.command(aliases=['予約状況'])
 async def ReservationStatus(ctx):
     await show_match_list(ctx.channel)
 
+# 一定時間ごとにキューの中身に古い日付がある場合削除します。また、キュー内容を定期的に連絡します。
 async def periodic_queue_update():
     await bot.wait_until_ready()
     channel = bot.get_channel(int(CHANNEL_ID))
     def game_refresh():
+        # 現在の時間を取得し、時間が過ぎたゲームをキャンセルします。
         now = datetime.datetime.now()
         cancel_game = []
         if len(queue) == 0:
@@ -209,6 +229,7 @@ async def periodic_queue_update():
                     result = True
             return result,cancel_game
     while not bot.is_closed():
+        # ボットが稼働している限り、期限切れのゲームをキャンセルし、キューの更新を続けます。
         result, cancel_game = game_refresh()   
         embed = discord.Embed(title="時間が過ぎたマッチの確認をしています……", color=0x00ff00)
         embed = discord.Embed(title="Checking for overdue matches ......", color=0x00ff00)
@@ -235,9 +256,11 @@ async def periodic_queue_update():
 async def ChooseMatch(ctx):
     user = ctx.author
     if len(queue) < 1:
+        # 対局待ちのキューが空の場合、ユーザーに通知します。
         await ctx.send('対局待ちしているプレイヤーがいません')
         await ctx.send('No players waiting for game')
     else:
+        # キュー内に対局待ちが存在する場合、対局を選択するようユーザーに選択させます。
         await ctx.send('対局待ちのプレイヤーを選択して下さい。選択はNo.の番号のみを入力してください\n' \
                        '例：3')
         await ctx.send('Please select a player waiting for a game. Please enter only the number of the No.ߡn' \
