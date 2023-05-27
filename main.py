@@ -4,15 +4,14 @@ import asyncio
 from collections import deque
 import datetime
 
-from config import TOKEN, CHANNEL_ID
 from player import Player
 
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
-SUPABASE_URL = os.environ.get('TOKEN')
-SUPABASE_KEY = os.environ.get('CHANNEL_ID')
+TOKEN = os.environ.get('TOKEN')
+CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -195,7 +194,7 @@ async def ReservationStatus(ctx):
 
 async def periodic_queue_update():
     await bot.wait_until_ready()
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(int(CHANNEL_ID))
     def game_refresh():
         now = datetime.datetime.now()
         cancel_game = []
