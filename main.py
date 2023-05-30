@@ -13,10 +13,7 @@ TOKEN = os.environ.get('TOKEN')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
 # Botのインテント(イベントを監視する対象)を設定
-### メッセージとリアクションに関するイベントのみをボットに許可
-intents = discord.Intents.default()
-intents.messages = True
-intents.reactions = True
+intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
